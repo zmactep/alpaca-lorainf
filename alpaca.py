@@ -3,16 +3,20 @@
 
 import json
 import argparse
+import os
+import sys
 import os.path as osp
 from typing import Union
 import torch
 from transformers import GenerationConfig, LlamaForCausalLM, LlamaTokenizer
 from peft import PeftModel
 
-
-BASE_MODEL = 'D:\\Models\\LLaMA\\hf'
-LORA_MODEL = 'D:\\Models\\Alpaca\\LoRA'
-
+try:
+    BASE_MODEL = osp.join(os.getenv("MODEL_LLAMA_BASEPATH"), "hf")
+    LORA_MODEL = osp.join(os.getenv("MODEL_ALPACA_LORA_BASEPATH"), "")
+except TypeError:
+    print("Model environment variables are not set")
+    sys.exit(1)
 
 class Prompter(object):
     __slots__ = ("template", "_verbose")
