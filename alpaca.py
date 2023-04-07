@@ -41,7 +41,7 @@ class AlpacaLora(object):
                                                  top_p=config.top_p,
                                                  top_k=config.top_k,
                                                  num_beams=config.num_beams)
-        self.max_new_tokens = config.max_new_tokens
+        self.max_new_tokens = config.max_size
         self._load(config)
 
     def _load(self, config):
@@ -128,7 +128,7 @@ def main():
                         help='generation top_p (default: 0.75)')
     parser.add_argument('--top_k', type=int, dest='top_k', default=40,
                         help='generation top_k (default: 40)')
-    parser.add_argument('--num_beans', type=int, dest='num_beans', default=4,
+    parser.add_argument('--num_beams', type=int, dest='num_beams', default=4,
                         help='generation number of beams (default: 4)')
     args = parser.parse_args()
 
