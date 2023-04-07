@@ -73,4 +73,19 @@ Pembrolizumab is a monoclonal antibody that is used to treat certain types of
 cancer. It works by targeting a protein called PD-1, which is found on the 
 surface of certain immune cells. By blocking PD-1, pembrolizumab helps the 
 immune system recognize and attack cancer cells.
+
+*****
+
+Question:
+Write a Python code that defines a list of tuples with name, birth year and death year of each Russian Emperor from Peter the Great to Nicholas II. Put the content of the list into a csv file with a correct header line.
+Answer:
+import csv
+
+russian_emperors = [('Peter the Great', 1682, 1725), ('Catherine the Great', 1729, 1796), ('Paul I', 1754, 1801), ('Alexander I', 1777, 1825), ('Nicholas I', 1796, 1855), ('Alexander II', 1818, 1881), ('Alexander III', 1845, 1894), ('Nicholas II', 1868, 1918)]
+
+with open('russian_emperors.csv', 'w') as f:
+    writer = csv.writer(f)
+    writer.writerow(['Name', 'Birth Year', 'Death Year'])
+    for emperor in russian_emperors:
+        writer.writerow([emperor[0], emperor[1], emperor[2]])
 ```
