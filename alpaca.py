@@ -1,177 +1,144 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import json
 import argparse
 import os
-import sys
 import os.path as osp
-from termcolor import colored
-from typing import Union
+import sys
 import torch
 from transformers import GenerationConfig, LlamaForCausalLM, LlamaTokenizer
 from peft import PeftModel
+
+from utils.prompter import Prompter
+from utils.io_utils import wait_and_answer, labeled_input
 
 try:
     BASE_MODEL = osp.join(os.getenv("MODEL_LLAMA_BASEPATH"), "hf")
     LORA_MODEL = osp.join(os.getenv("MODEL_ALPACA_LORA_BASEPATH"), "")
 except TypeError:
-    print("Model environment variables are not set")
+    print("Model environment variables (MODEL_LLAMA_BASEPATH and MODEL_ALPACA_LORA_BASEPATH) are not set")
     sys.exit(1)
 
-class Prompter(object):
-    __slots__ = ("template", "_verbose")
+if torch.cuda.is_available():
+    DEVICE = 'cuda'
+else:
+    DEVICE = 'cpu'
 
-    def __init__(self, template_name: str = "", verbose: bool = False):
-        self._verbose = verbose
-        if not template_name:
-            # Enforce the default here, so the constructor can be called with '' and will not break.
-            template_name = "alpaca"
-        file_name = osp.join("templates", f"{template_name}.json")
-        if not osp.exists(file_name):
-            raise ValueError(f"Can't read {file_name}")
-        with open(file_name) as fp:
-            self.template = json.load(fp)
-        if self._verbose:
-            print(
-                f"Using prompt template {template_name}: {self.template['description']}"
-            )
-
-    def generate_prompt(
-        self,
-        instruction: str,
-        input: Union[None, str] = None,
-        label: Union[None, str] = None,
-    ) -> str:
-        # returns the full prompt from instruction and optional input
-        # if a label (=response, =output) is provided, it's also appended.
-        if input:
-            res = self.template["prompt_input"].format(
-                instruction=instruction, input=input
-            )
-        else:
-            res = self.template["prompt_no_input"].format(
-                instruction=instruction
-            )
-        if label:
-            res = f"{res}{label}"
-        if self._verbose:
-            print(res)
-        return res
-
-    def get_response(self, output: str) -> str:
-        return output.split(self.template["response_split"])[1].strip()
+try:
+    if torch.backends.mps.is_available():
+        DEVICE = 'mps'
+except AttributeError:
+    pass
 
 
-def load_model(model_size, load_in_8bit=True, compile_model=False, device='auto'):
-    device = {'':0} if device == 'single' else 'auto'
+class AlpacaLora(object):
+    """Question-answer generation model"""
+    def __init__(self, config):
+        self.tokenizer = None
+        self.model = None
+        self.prompter = Prompter(config.template)
+        self.generation_config = GenerationConfig(temperature=config.temperature,
+                                                 top_p=config.top_p,
+                                                 top_k=config.top_k,
+                                                 num_beams=config.num_beams)
+        self.max_new_tokens = config.max_new_tokens
+        self._load(config)
 
-    tokenizer = LlamaTokenizer.from_pretrained(osp.join(BASE_MODEL, model_size))
+    def _load(self, config):
+        self.tokenizer = LlamaTokenizer.from_pretrained(osp.join(BASE_MODEL, config.model_size))
+        self.model = LlamaForCausalLM.from_pretrained(osp.join(BASE_MODEL, config.model_size),
+                                                      load_in_8bit=config.load_in_8bit,
+                                                      torch_dtype=torch.float16,
+                                                      device_map='auto')
+        if config.use_lora:
+            device_map = 'auto'
+            if sys.platform == "win32":
+                device_map = {'':0}
+            self.model = PeftModel.from_pretrained(self.model,
+                                                   osp.join(LORA_MODEL, config.model_size),
+                                                   torch_dtype=torch.float16,
+                                                   device_map=device_map)
+        if not config.load_in_8bit:
+            self.model.half()
+        self.model.eval()
+        if torch.__version__ >= "2" and sys.platform != "win32":
+            self.model = torch.compile(self.model)
 
-    model = LlamaForCausalLM.from_pretrained(osp.join(BASE_MODEL, model_size),
-                                             load_in_8bit=load_in_8bit,
-                                             torch_dtype=torch.float16,
-                                             device_map=device)
-    model = PeftModel.from_pretrained(model,
-                                      osp.join(LORA_MODEL, model_size),
-                                      torch_dtype=torch.float16,
-                                      device_map=device)
-    if not load_in_8bit:
-        model.half()
+    def _tokenize(self, request, context):
+        prompt = self.prompter.generate_prompt(request, context)
+        inputs = self.tokenizer(prompt, return_tensors="pt")
+        return inputs['input_ids'].to(DEVICE)
 
-    model.eval()
-    if compile_model:
-        model = torch.compile(model)
+    def generate(self, request, context=None):
+        """Generate answer on specified question"""
+        input_ids = self._tokenize(request, context)
 
-    return tokenizer, model
-
-
-def get_input():
-    line = ""
-    user_input = ""
-    try:
-        while True:
-            line = input()
-            if len(user_input) > 0:
-                line = "\n" + line
-            user_input += line
-    except EOFError:
-        pass
-    return user_input
-
-
-def delete_last_line():
-    "Use this function to delete the last line in the STDOUT"
-    #cursor up one line
-    sys.stdout.write('\x1b[1A')
-    #delete last line
-    sys.stdout.write('\x1b[2K')
-
-
-def main_cycle(tokenizer, model, use_input=False, template=None, max_new_tokens=1024):
-    prompter = Prompter(template)
-    generation_config = GenerationConfig(temperature=1, top_p=0.75, top_k=40, num_beams=4)
-    request = None
-    rinput = None
-
-    print("Print (exit) as a question to quit.")
-    while True:
-        print(colored('Question:', 'green'))
-        request = get_input()
-        if request == '(exit)':
-            break
-        if use_input:
-            print(colored('Input:', 'green'))
-            rinput = get_input()
-
-        prompt = prompter.generate_prompt(request, rinput)
-        inputs = tokenizer(prompt, return_tensors="pt")
-        input_ids = inputs['input_ids'].to('cuda')
-
-        print(colored('Answer:', 'green'))
-        print(colored('[generating]', 'yellow'))
         with torch.no_grad():
-            generation_output = model.generate(
+            generation_output = self.model.generate(
                 input_ids=input_ids,
-                generation_config=generation_config,
+                generation_config=self.generation_config,
                 return_dict_in_generate=True,
                 output_scores=True,
-                max_new_tokens=max_new_tokens,
+                max_new_tokens=self.max_new_tokens,
             )
-
-        delete_last_line()
-        print(colored('[decoding]', 'yellow'))
         s = generation_output.sequences[0]
-        output = tokenizer.decode(s)
-        delete_last_line()
-        print(colored(prompter.get_response(output), 'blue'))
-        print(colored('\n*****\n', 'red'))
+        output = self.tokenizer.decode(s)
+        return self.prompter.get_response(output)
+
+
+def one_shot(alpaca, prompt):
+    """Generates single output for specified prompt"""
+    wait_and_answer(lambda: alpaca.generate(prompt))
+
+
+def repl(alpaca, use_input=False):
+    """Use alpaca as a repl"""
+    request = None
+    context = None
+    while True:
+        request = labeled_input('Request:')
+        if len(request) == 0:
+            return
+        context = labeled_input('Context:') if use_input else None
+        wait_and_answer(lambda: alpaca.generate(request, context))
 
 
 def main():
-    os.system('color')
-
-    parser = argparse.ArgumentParser(
-                        prog='Alpaca-LoRA',
-                        description='Question-answer system based on LLaMa model')
-    parser.add_argument('--device', dest='device',
-                        choices=['single', 'auto'],
-                        default='auto', help='device to map the model (default: auto)')
-    parser.add_argument('--model', dest='model',
+    """Main function"""
+    parser = argparse.ArgumentParser(prog='Alpaca-LoRA',
+                                     description='Question-answer system based on LLaMa model')
+    parser.add_argument('--model', dest='model_size',
                         choices=['7B', '13B', '30B', '65B'],
                         default='13B', help='size of the model (default: 13B)')
+    parser.add_argument('--template', dest='template', default=None,
+                        help='use specific template from template/ dir (default: disabled)')
     parser.add_argument('--max-size', dest='max_size',
-                        default=512, type=int, help='max generation size (default: 512)')
+                        default=512, type=int, help='max generation size (default: 1024)')
     parser.add_argument('--8bit', action='store_true', dest='load_in_8bit',
-                        help='use int8 quantification (default: False)')
-    parser.add_argument('--compile', action='store_true', dest='compile_model',
-                        help='compile model after load (default: False)')
+                        help='use int8 quantification (default: false)')
+    parser.add_argument('--no-lora', action='store_false', dest='use_lora',
+                        help='do not load LoRA weights and use plain LLaMA (default: false)')
     parser.add_argument('--input', action='store_true', dest='use_input',
-                        help='use additional context as input (default: False)')
+                        help='use additional context as input (default: false)')
+    parser.add_argument('--prompt', type=str, dest='prompt', default=None,
+                        help='run single shot on a specific request (default: disables)')
+    parser.add_argument('--temperature', type=float, dest='temperature', default=1,
+                        help='generation temperature (default: 1)')
+    parser.add_argument('--top_p', type=float, dest='top_p', default=0.75,
+                        help='generation top_p (default: 0.75)')
+    parser.add_argument('--top_k', type=int, dest='top_k', default=40,
+                        help='generation top_k (default: 40)')
+    parser.add_argument('--num_beans', type=int, dest='num_beans', default=4,
+                        help='generation number of beams (default: 4)')
     args = parser.parse_args()
 
-    tokenizer, model = load_model(args.model, compile_model=args.compile_model, load_in_8bit=args.load_in_8bit, device=args.device)
-    main_cycle(tokenizer, model, max_new_tokens=args.max_size, use_input=args.use_input)
+    alpaca = AlpacaLora(args)
+
+    os.system('color')
+    if args.prompt:
+        one_shot(alpaca, args.prompt)
+    else:
+        repl(alpaca, args.use_input)
 
 
 if __name__ == '__main__':

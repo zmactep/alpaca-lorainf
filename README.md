@@ -14,21 +14,32 @@ There is a custom finetune script in this repo for a non-quantified training.
 
 ```
 $ python alpaca.py -h
-usage: Alpaca-LoRA [-h] [--device {single,auto}] [--model {7B,13B,30B,65B}]
-                   [--max-size MAX_SIZE] [--8bit] [--compile] [--input]
+usage: Alpaca-LoRA [-h] [--model {7B,13B,30B,65B}] [--template TEMPLATE]
+                   [--max-size MAX_SIZE] [--8bit] [--no-lora] [--input]
+                   [--prompt PROMPT] [--temperature TEMPERATURE]
+                   [--top_p TOP_P] [--top_k TOP_K] [--num_beans NUM_BEANS]
 
 Question-answer system based on LLaMa model
 
 options:
   -h, --help            show this help message and exit
-  --device {single,auto}
-                        device to map the model (default: auto)
   --model {7B,13B,30B,65B}
                         size of the model (default: 13B)
-  --max-size MAX_SIZE   max generation size (default: 512)
-  --8bit                use int8 quantification (default: False)
-  --compile             compile model after load (default: False)
-  --input               use additional context as input (default: False)
+  --template TEMPLATE   use specific template from template/ dir (default:
+                        disabled)
+  --max-size MAX_SIZE   max generation size (default: 1024)
+  --8bit                use int8 quantification (default: false)
+  --no-lora             do not load LoRA weights and use plain LLaMA (default:
+                        false)
+  --input               use additional context as input (default: false)
+  --prompt PROMPT       run single shot on a specific request (default:
+                        disables)
+  --temperature TEMPERATURE
+                        generation temperature (default: 1)
+  --top_p TOP_P         generation top_p (default: 0.75)
+  --top_k TOP_K         generation top_k (default: 40)
+  --num_beans NUM_BEANS
+                        generation number of beams (default: 4)
 ```
 
 ## Home use
