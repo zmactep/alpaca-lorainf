@@ -63,17 +63,19 @@ class Prompter(object):
         return output.split(self.template["response_split"])[1].strip()
 
 
-def load_model(model_size, load_in_8bit=True, compile_model=False):
+def load_model(model_size, load_in_8bit=True, compile_model=False, device='auto'):
+    device = {'':0} if device == 'single' else 'auto'
+
     tokenizer = LlamaTokenizer.from_pretrained(osp.join(BASE_MODEL, model_size))
 
     model = LlamaForCausalLM.from_pretrained(osp.join(BASE_MODEL, model_size),
                                              load_in_8bit=load_in_8bit,
                                              torch_dtype=torch.float16,
-                                             device_map='auto')
+                                             device_map=device)
     model = PeftModel.from_pretrained(model,
                                       osp.join(LORA_MODEL, model_size),
                                       torch_dtype=torch.float16,
-                                      device_map={'':0})
+                                      device_map=device)
     if not load_in_8bit:
         model.half()
 
@@ -152,6 +154,9 @@ def main():
     parser = argparse.ArgumentParser(
                         prog='Alpaca-LoRA',
                         description='Question-answer system based on LLaMa model')
+    parser.add_argument('--device', dest='device',
+                        choices=['single', 'auto'],
+                        default='auto', help='device to map the model (default: auto)')
     parser.add_argument('--model', dest='model',
                         choices=['7B', '13B', '30B', '65B'],
                         default='13B', help='size of the model (default: 13B)')
@@ -165,7 +170,7 @@ def main():
                         help='use additional context as input (default: False)')
     args = parser.parse_args()
 
-    tokenizer, model = load_model(args.model, compile_model=args.compile_model, load_in_8bit=args.load_in_8bit)
+    tokenizer, model = load_model(args.model, compile_model=args.compile_model, load_in_8bit=args.load_in_8bit, device=args.device)
     main_cycle(tokenizer, model, max_new_tokens=args.max_size, use_input=args.use_input)
 
 
