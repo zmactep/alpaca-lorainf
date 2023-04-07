@@ -6,6 +6,7 @@ import argparse
 import os
 import sys
 import os.path as osp
+from termcolor import colored
 from typing import Union
 import torch
 from transformers import GenerationConfig, LlamaForCausalLM, LlamaTokenizer
@@ -97,6 +98,14 @@ def get_input():
     return user_input
 
 
+def delete_last_line():
+    "Use this function to delete the last line in the STDOUT"
+    #cursor up one line
+    sys.stdout.write('\x1b[1A')
+    #delete last line
+    sys.stdout.write('\x1b[2K')
+
+
 def main_cycle(tokenizer, model, use_input=False, template=None, max_new_tokens=1024):
     prompter = Prompter(template)
     generation_config = GenerationConfig(temperature=1, top_p=0.75, top_k=40, num_beams=4)
@@ -105,18 +114,20 @@ def main_cycle(tokenizer, model, use_input=False, template=None, max_new_tokens=
 
     print("Print (exit) as a question to quit.")
     while True:
-        print('Question:')
+        print(colored('Question:', 'green'))
         request = get_input()
         if request == '(exit)':
             break
         if use_input:
-            print('Input:')
+            print(colored('Input:', 'green'))
             rinput = get_input()
 
         prompt = prompter.generate_prompt(request, rinput)
         inputs = tokenizer(prompt, return_tensors="pt")
         input_ids = inputs['input_ids'].to('cuda')
 
+        print(colored('Answer:', 'green'))
+        print(colored('[generating]', 'yellow'))
         with torch.no_grad():
             generation_output = model.generate(
                 input_ids=input_ids,
@@ -126,14 +137,18 @@ def main_cycle(tokenizer, model, use_input=False, template=None, max_new_tokens=
                 max_new_tokens=max_new_tokens,
             )
 
+        delete_last_line()
+        print(colored('[decoding]', 'yellow'))
         s = generation_output.sequences[0]
         output = tokenizer.decode(s)
-        print("Answer:")
-        print(prompter.get_response(output))
-        print("\n*****\n\n")
+        delete_last_line()
+        print(colored(prompter.get_response(output), 'blue'))
+        print(colored('\n*****\n', 'red'))
 
 
 def main():
+    os.system('color')
+
     parser = argparse.ArgumentParser(
                         prog='Alpaca-LoRA',
                         description='Question-answer system based on LLaMa model')
