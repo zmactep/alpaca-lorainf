@@ -86,21 +86,22 @@ class AlpacaLora(object):
         return self.prompter.get_response(output)
 
 
-def one_shot(alpaca, prompt):
+def one_shot(alpaca, prompt, context):
     """Generates single output for specified prompt"""
-    wait_and_answer(lambda: alpaca.generate(prompt))
+    wait_and_answer(lambda: alpaca.generate(prompt, context))
 
 
-def repl(alpaca, use_input=False):
+def repl(alpaca, use_context=False, context=None):
     """Use alpaca as a repl"""
     request = None
-    context = None
+    request_context = context if use_context else None
     while True:
         request = labeled_input('Request:')
         if len(request) == 0:
             return
-        context = labeled_input('Context:') if use_input else None
-        wait_and_answer(lambda: alpaca.generate(request, context))
+        if use_context and context is None:
+            request_context = labeled_input("Context:")
+        wait_and_answer(lambda: alpaca.generate(request, request_context))
 
 
 def main():
@@ -118,10 +119,12 @@ def main():
                         help='use int8 quantification (default: false)')
     parser.add_argument('--no-lora', action='store_false', dest='use_lora',
                         help='do not load LoRA weights and use plain LLaMA (default: false)')
-    parser.add_argument('--input', action='store_true', dest='use_input',
+    parser.add_argument('--use-context', action='store_true', dest='use_context',
                         help='use additional context as input (default: false)')
     parser.add_argument('--prompt', type=str, dest='prompt', default=None,
-                        help='run single shot on a specific request (default: disables)')
+                        help='run single-shot on a specific request (default: disabled)')
+    parser.add_argument('--context', type=str, dest='context', default=None,
+                        help='fixed context for all requests (default: disabled)')
     parser.add_argument('--temperature', type=float, dest='temperature', default=1,
                         help='generation temperature (default: 1)')
     parser.add_argument('--top_p', type=float, dest='top_p', default=0.75,
@@ -136,9 +139,9 @@ def main():
 
     os.system('color')
     if args.prompt:
-        one_shot(alpaca, args.prompt)
+        one_shot(alpaca, args.prompt, args.context)
     else:
-        repl(alpaca, args.use_input)
+        repl(alpaca, args.use_context, args.context)
 
 
 if __name__ == '__main__':
